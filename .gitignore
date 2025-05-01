@@ -1,0 +1,22 @@
+# Виртуальное окружение
+venv/
+.venv/
+
+# Файлы с секретами
+.env
+
+# Кэш и скомпилированные файлы Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Файлы IDE/редактора (добавь свои при необходимости)
+.vscode/
+.idea/
+
+
+# Папки с данными
+data/raw_html/
+data/cleaned_md/
+data/posts_md/

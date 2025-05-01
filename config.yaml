@@ -1,0 +1,95 @@
+# config.yaml
+
+# Модель по умолчанию (может быть переопределена для конкретных задач)
+default_model: "gemini-1.5-flash-latest" # Используем последнюю версию flash
+
+# Настройки для очистки HTML
+cleaning:
+  # Модель можно указать здесь, если отличается от default_model
+  # model: "gemini-1.5-flash-latest"
+  prompt: |  # Промпт для извлечения чистого текста
+    Ты - эксперт по извлечению контента из веб-страниц. Тебе дан HTML-код веб-страницы. Твоя задача - извлечь из него ТОЛЬКО основной текст статьи. Удали все HTML-теги, CSS стили, JavaScript код, навигационные меню, боковые панели, рекламные блоки, секции комментариев и любой другой нерелевантный контент. Сохрани разделение на параграфы (пустые строки между абзацами). Не добавляй никакого вступления или заключения от себя, просто верни чистый текст статьи. Не используй markdown форматирование в ответе.
+
+    Вот HTML для обработки:
+    ```html
+    {raw_html}
+    ```
+
+    Извлеченный текст:
+
+
+# Telegram-настройки
+telegram:
+  channel_id: "@tehnosocium"
+  admin_chat_id: "773767996"
+  bot_token: "%TELEGRAM_BOT_TOKEN%"
+
+# Пути
+paths:
+  db: "db/articles.db"
+  raw_html: "data/raw_html"
+  cleaned_md: "data/cleaned_md"
+  posts_md: "data/posts_md"
+
+# RSS-источники
+rss_sources:
+  - name: "Google AI Blog"
+    url: "https://blog.google/technology/ai/rss/"
+  - name: "Google Developers Blog"
+    url: "https://developers.googleblog.com/rss/"
+  - name: "DeepMind Blog"
+    url: "https://deepmind.com/blog/rss.xml"
+  - name: "BAIR Blog"
+    url: "https://bair.berkeley.edu/blog/feed.xml"
+  - name: "MIT News - Artificial Intelligence"
+    url: "https://news.mit.edu/rss/topic/artificial-intelligence2"
+  - name: "Unite.AI"
+    url: "https://unite.ai/feed/"
+  - name: "VentureBeat AI"
+    url: "https://venturebeat.com/category/ai/feed/"
+  - name: "MarkTechPost"
+    url: "https://www.marktechpost.com/feed/"
+  - name: "ScienceDaily - AI News"
+    url: "https://www.sciencedaily.com/rss/computers_math/artificial_intelligence.xml"
+  - name: "TOPBOTS"
+    url: "https://www.topbots.com/feed/"
+  - name: "Distill"
+    url: "https://distill.pub/rss.xml"
+  - name: "AWS Machine Learning Blog"
+    url: "https://aws.amazon.com/blogs/machine-learning/feed/"
+  - name: "NVIDIA AI Blog"
+    url: "https://blogs.nvidia.com/feed/"
+  - name: "AI Alignment Forum"
+    url: "https://www.alignmentforum.org/rss"
+  - name: "The Gradient"
+    url: "https://thegradient.pub/rss/"
+
+summary:
+  prompt: |
+    Summarize the article in 150 words or less, focusing on key points relevant to AI, machine learning, or technology innovation. Provide only the summary text, no extra formatting or labels.
+    Example:
+    New AI techniques improve data analysis efficiency by leveraging advanced neural networks, achieving higher accuracy in predictive modeling.
+    Article:
+    Title: {title}
+    Description: {description}
+    URL: {url}
+
+selection:
+  prompt: |
+    Given a list of article summaries (up to 150 words each), select the one most suitable for a Telegram channel focused on AI advancements, machine learning, and technology innovation.
+    Return ONLY this format, with no extra text or deviations:
+    Selected Title: [Title]
+    Selected URL: [URL]
+    Reason: [Your reason, explain why this article is the best fit]
+    ---
+    Summaries:
+    {summaries}
+
+content:
+  prompt: |
+    Ты профессиональный исследователь-разработчик специализирующийся на ИИ, агентах, агентных системах. Напиши пост в Telegram на русском языке, обобщающий концепции из статьи ниже. Не пиши про статью, пиши про концепции в статье. Пост для канала, ориентированного на ИИ для технически подкованной аудитории. Изложи основные идеи и ключевые концепции в профессиональной форме. Начни с крючка (например, неожиданного факта или вопроса), чтобы привлечь внимание. Используй заголовки, для ключевых моментов, если статья охватывает несколько концепций. Заверши тремя хэштегами по теме статьи. Хэштеги не должны быть слишком общие. Используй эмодзи, но не много, в самых необходимых местах. Не выделяй текст спецсимволами! Текст должен быть не более 900 символов.
+    Article:
+    Title: {title}
+    Text: {text}
+  # model: "gemini-2.5-pro-exp-03-25"
+  model: "gemini-2.0-flash"
