@@ -6,15 +6,13 @@ import logging
 import re # Для поиска разделителей YAML
 from typing import Optional, Tuple, Dict, Any
 
-# Настраиваем логирование для этого модуля
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Настраиваем логирование для этого модуля на русском
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S') # Формат времени можно оставить стандартным
 logger = logging.getLogger("MDUtils")
 
-# Регулярное выражение для поиска YAML Front Matter
-# Оно ищет блок, начинающийся с '---' в начале строки,
-# затем любой текст (нежадно), и заканчивающийся '---' в начале строки.
-# re.DOTALL позволяет '.' соответствовать и символу новой строки.
-# re.MULTILINE позволяет '^' и '$' соответствовать началу/концу строки, а не всего текста.
+# Регулярное выражение для поиска YAML Front Matter (остается без изменений)
 YAML_FRONT_MATTER_REGEX = re.compile(r'^\s*---\s*\n(.*?\n?)\s*---\s*\n?(.*)', re.DOTALL | re.MULTILINE)
 
 def read_md_file(filepath: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -34,7 +32,7 @@ def read_md_file(filepath: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]
     text_content: Optional[str] = None
 
     if not os.path.exists(filepath):
-        logger.error(f"MD file not found: {filepath}")
+        logger.error(f"MD файл не найден: {filepath}")
         return None, None
 
     try:
@@ -45,30 +43,27 @@ def read_md_file(filepath: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]
 
         if match:
             yaml_string = match.group(1)
-            text_content = match.group(2).strip() # Удаляем лишние пробелы/переносы в начале/конце текста
+            text_content = match.group(2).strip()
             try:
                 yaml_data = yaml.safe_load(yaml_string)
                 if not isinstance(yaml_data, dict):
-                    # Если YAML не является словарем, считаем его некорректным для наших целей
-                    logger.warning(f"YAML front matter in {filepath} is not a dictionary. Treating as None.")
+                    logger.warning(f"YAML секция в файле {filepath} не является словарем. Считаем как None.")
                     yaml_data = None
             except yaml.YAMLError as e:
-                logger.error(f"Error parsing YAML front matter in {filepath}: {e}")
-                # YAML есть, но с ошибкой. Текст все равно вернем.
-                yaml_data = None # Считаем YAML невалидным
+                logger.error(f"Ошибка парсинга YAML секции в файле {filepath}: {e}")
+                yaml_data = None # YAML есть, но некорректный
         else:
-            # YAML секция не найдена, считаем все содержимое текстом
-            logger.debug(f"No YAML front matter found in {filepath}. Reading entire content as text.")
+            logger.debug(f"YAML секция не найдена в файле {filepath}. Читаем всё содержимое как текст.")
             text_content = content.strip()
-            yaml_data = {} # Возвращаем пустой словарь, чтобы показать, что файл прочитан, но YAML нет
+            yaml_data = {} # Файл прочитан, но YAML нет
 
         return yaml_data, text_content
 
     except IOError as e:
-        logger.error(f"Error reading MD file {filepath}: {e}")
+        logger.error(f"Ошибка чтения MD файла {filepath}: {e}")
         return None, None
-    except Exception as e: # Ловим другие непредвиденные ошибки
-        logger.error(f"Unexpected error processing MD file {filepath}: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка при обработке MD файла {filepath}: {e}", exc_info=True)
         return None, None
 
 
@@ -84,39 +79,33 @@ def update_md_yaml(filepath: str, data_to_update: Dict[str, Any]) -> bool:
     Returns:
         True при успехе, False при ошибке.
     """
-    if not data_to_update: # Нечего обновлять
-        logger.warning(f"No data provided to update YAML in {filepath}.")
+    if not data_to_update:
+        logger.warning(f"Нет данных для обновления YAML в файле {filepath}.")
         return True # Считаем успехом, так как делать нечего
 
     yaml_data, text_content = read_md_file(filepath)
 
     if yaml_data is None and text_content is None:
-        # Ошибка чтения исходного файла
-        logger.error(f"Cannot update YAML for {filepath}, failed to read original file.")
+        logger.error(f"Не удалось обновить YAML для файла {filepath}, ошибка чтения исходного файла.")
         return False
 
-    # Если YAML не был найден, read_md_file вернет пустой словарь
     if yaml_data is None:
-         yaml_data = {} # Инициализируем, если его не было
+         yaml_data = {} # Инициализируем, если YAML секции не было
 
     # Обновляем словарь новыми данными
     yaml_data.update(data_to_update)
 
     try:
         # Преобразуем обновленный словарь обратно в YAML строку
-        # allow_unicode=True сохраняет не-ASCII символы
-        # sort_keys=False сохраняет порядок ключей (может быть полезно для читаемости)
-        # default_flow_style=False предпочитает блочный стиль YAML
         updated_yaml_string = yaml.dump(
             yaml_data,
             allow_unicode=True,
             sort_keys=False,
             default_flow_style=False,
-            indent=2 # Добавим отступ для читаемости
+            indent=2
         )
 
         # Формируем новое содержимое файла
-        # Добавляем пустую строку после YAML, если есть текст
         separator = "\n\n" if text_content else "\n"
         new_content = f"---\n{updated_yaml_string.strip()}\n---\n{separator}{text_content or ''}"
 
@@ -124,17 +113,17 @@ def update_md_yaml(filepath: str, data_to_update: Dict[str, Any]) -> bool:
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(new_content)
 
-        logger.info(f"Successfully updated YAML in {filepath} with keys: {list(data_to_update.keys())}")
+        logger.info(f"YAML секция успешно обновлена в файле {filepath}. Добавлены/обновлены ключи: {list(data_to_update.keys())}")
         return True
 
     except yaml.YAMLError as e:
-        logger.error(f"Error converting data to YAML for {filepath}: {e}")
+        logger.error(f"Ошибка преобразования данных в YAML для файла {filepath}: {e}")
         return False
     except IOError as e:
-        logger.error(f"Error writing updated MD file {filepath}: {e}")
+        logger.error(f"Ошибка записи обновленного MD файла {filepath}: {e}")
         return False
     except Exception as e:
-        logger.error(f"Unexpected error updating MD file {filepath}: {e}", exc_info=True)
+        logger.error(f"Неожиданная ошибка при обновлении MD файла {filepath}: {e}", exc_info=True)
         return False
 
 
@@ -152,12 +141,12 @@ def create_post_md_file(filepath: str, yaml_data: Dict[str, Any], post_text: str
     """
     try:
         # Убедимся, что директория существует (импортируем из file_utils)
-        from .file_utils import ensure_dir_exists # Локальный импорт для избежания цикличности
+        from .file_utils import ensure_dir_exists # Локальный импорт
         ensure_dir_exists(os.path.dirname(filepath))
 
         # Формируем YAML-секцию
         yaml_string = yaml.dump(
-            yaml_data if yaml_data else {}, # Обработка случая пустого yaml_data
+            yaml_data if yaml_data else {},
             allow_unicode=True,
             sort_keys=False,
             default_flow_style=False,
@@ -171,18 +160,18 @@ def create_post_md_file(filepath: str, yaml_data: Dict[str, Any], post_text: str
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
 
-        logger.info(f"Successfully created post MD file: {filepath}")
+        logger.info(f"MD файл поста успешно создан: {filepath}")
         return True
 
     except yaml.YAMLError as e:
-        logger.error(f"Error converting YAML data for new post file {filepath}: {e}")
+        logger.error(f"Ошибка преобразования YAML данных для нового файла поста {filepath}: {e}")
         return False
     except IOError as e:
-        logger.error(f"Error writing new post MD file {filepath}: {e}")
+        logger.error(f"Ошибка записи нового MD файла поста {filepath}: {e}")
         return False
-    except ImportError: # Если file_utils не найден
-         logger.error("Could not import ensure_dir_exists from file_utils. Make sure it exists.")
+    except ImportError:
+         logger.error("Не удалось импортировать ensure_dir_exists из file_utils. Убедитесь, что функция существует.")
          return False
     except Exception as e:
-        logger.error(f"Unexpected error creating post MD file {filepath}: {e}", exc_info=True)
+        logger.error(f"Неожиданная ошибка при создании MD файла поста {filepath}: {e}", exc_info=True)
         return False
