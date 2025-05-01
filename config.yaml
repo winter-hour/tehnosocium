@@ -64,15 +64,26 @@ rss_sources:
   - name: "The Gradient"
     url: "https://thegradient.pub/rss/"
 
-summary:
+summarizer:
+  # model: "gemini-1.5-flash-latest"
   prompt: |
-    Summarize the article in 150 words or less, focusing on key points relevant to AI, machine learning, or technology innovation. Provide only the summary text, no extra formatting or labels.
-    Example:
-    New AI techniques improve data analysis efficiency by leveraging advanced neural networks, achieving higher accuracy in predictive modeling.
-    Article:
-    Title: {title}
-    Description: {description}
-    URL: {url}
+    Ты - эксперт-аналитик в области ИИ. Твоя задача - прочитать текст статьи и написать подробное резюме (примерно 8-12 предложений), которое раскрывает основные идеи, ключевые концепции, методы и результаты, описанные в статье. Резюме должно быть сфокусировано на аспектах, наиболее интересных для специалистов по ИИ, машинному обучению, ИИ-агентам или мультиагентным системам.
+
+    Структура резюме:
+    1. Кратко представь основную проблему или тему статьи.
+    2. Опиши предложенный подход, метод или технологию.
+    3. Изложи ключевые результаты, выводы или значение работы.
+    4. НЕ ДОБАВЛЯЙ никакого вступления ("В этой статье...") или заключения ("Таким образом..."). Пиши только суть.
+
+    Твой ответ должен содержать ТОЛЬКО текст резюме, без заголовка "Резюме:", кавычек, markdown или другого форматирования.
+
+    Заголовок статьи (для контекста): {title}
+
+    Текст статьи для анализа:
+    {cleaned_text}
+
+    Подробное резюме (только текст):
+  # max_articles_per_run: 50
 
 selection:
   prompt: |
