@@ -196,23 +196,52 @@ class SelectorAgent(BaseAgent):
             error_details = str(e.message if hasattr(e, 'message') else e)
             logger.error(f"Агент '{self.name}': Ошибка API Gemini или другая ошибка при выборе статьи: {error_details}", exc_info=True)
 
-        # 7. Обновляем статус выбранной статьи
+        # 7. Обновляем статус выбранной статьи (в файле и БД)
         if selected_url:
             selected_article_id = None
-            for cand in candidates_to_send: # Ищем среди тех, что отправили
+            selected_md_path = None # Нам нужен путь к MD файлу выбранной статьи
+            # Ищем ID и ПУТЬ статьи по URL среди тех, что отправляли на выбор
+            for cand in candidates_to_send:
                 if cand['url'] == selected_url:
                     selected_article_id = cand['id']
-                    break
+                    # Нам нужно найти исходную информацию для этого ID, включая cleaned_md_path
+                    # Пройдемся по списку из БД еще раз (или сохраним его заранее)
+                    for original_info in candidate_articles_info: # candidate_articles_info - список из БД
+                         if original_info['id'] == selected_article_id:
+                              selected_md_path = original_info.get('cleaned_md_path')
+                              break
+                    break # Выходим из внешнего цикла, как только нашли
 
-            if selected_article_id:
+            if selected_article_id and selected_md_path:
                 logger.info(f"Агент '{self.name}': Выбрана статья ID: {selected_article_id} (URL: {selected_url}). Обновление статуса на 'selected'...")
-                # Обновляем статус только одной статьи
-                db_utils.update_article_status(selected_article_id, 'selected')
-                # Остальные кандидаты остаются со статусом 'summarized' для возможного выбора в будущем
+
+                # --- СНАЧАЛА ОБНОВЛЯЕМ YAML В MD ФАЙЛЕ ---
+                try:
+                    data_to_update = {'status': 'selected'}
+                    success = md_utils.update_md_yaml(selected_md_path, data_to_update)
+                    if success:
+                        logger.info(f"Агент '{self.name}': Статус в YAML файла {selected_md_path} обновлен на 'selected'.")
+                        # --- ТОЛЬКО ПОСЛЕ УСПЕШНОГО ОБНОВЛЕНИЯ ФАЙЛА, ОБНОВЛЯЕМ БД ---
+                        db_utils.update_article_status(selected_article_id, 'selected')
+                    else:
+                        # Ошибка обновления MD файла (уже залогирована в md_utils)
+                        # НЕ обновляем статус в БД, чтобы сохранить консистентность
+                        logger.error(f"Агент '{self.name}': Не удалось обновить статус в YAML файла {selected_md_path}. Статус в БД НЕ изменен.")
+                        # Можно добавить обновление статуса в БД на 'selection_failed' здесь, если нужно
+                        # db_utils.update_article_status(selected_article_id, 'selection_failed', error_msg="Ошибка обновления MD файла при выборе")
+
+                except Exception as e:
+                    logger.error(f"Агент '{self.name}': Неожиданная ошибка при обновлении MD файла {selected_md_path} для ID {selected_article_id}: {e}", exc_info=True)
+                    # Статус в БД НЕ обновляем
+                    # Можно пометить как 'selection_failed'
+                    # db_utils.update_article_status(selected_article_id, 'selection_failed', error_msg=f"Ошибка обновления MD: {e}")
+
+            elif selected_article_id and not selected_md_path:
+                 logger.error(f"Агент '{self.name}': Найден ID={selected_article_id}, но не найден путь к MD файлу для URL '{selected_url}'. Невозможно обновить статус в файле.")
+                 # Статус в БД не обновляем, так как файл не можем обновить
             else:
                 logger.error(f"Агент '{self.name}': LLM вернула URL '{selected_url}', но статья с таким URL не найдена среди кандидатов, отправленных на выбор. Выбор не сделан.")
         else:
             logger.info(f"Агент '{self.name}': URL не был выбран моделью или не удалось извлечь.")
-
 
         logger.info(f"Агент '{self.name}': Цикл выбора статьи завершен.")
