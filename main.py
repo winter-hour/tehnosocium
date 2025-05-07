@@ -1,5 +1,5 @@
 # main.py
-
+# --- Импорты ---
 import asyncio
 import json
 import logging
@@ -13,10 +13,11 @@ from agents.fetcher_agent import FetcherAgent
 from agents.cleaner_agent import CleanerAgent
 from agents.summarizer_agent import SummarizerAgent
 from agents.selector_agent import SelectorAgent
-from agents.generator_agent import GeneratorAgent 
+from agents.generator_agent import GeneratorAgent
+from agents.publisher_agent import PublisherAgent # <-- Импорт PublisherAgent
 
 logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s', # Добавил имя файла и строку
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger("MainApp")
 
@@ -28,7 +29,7 @@ def load_config():
             config_str = f.read()
         def replace_env_var(match):
             var_name = match.group(1)
-            return os.getenv(var_name, f"%{var_name}%")
+            return os.getenv(var_name, f"%{var_name}%") # Возвращаем плейсхолдер, если переменной нет
         config_str_expanded = re.sub(r"%(\w+)%", replace_env_var, config_str)
         config = yaml.safe_load(config_str_expanded)
         logger.info("Конфигурация успешно загружена.")
@@ -52,7 +53,6 @@ async def main():
     logger.info("Пересборка моделей агентов...")
     try:
         FetcherAgent.model_rebuild(_types_namespace={'CleanerAgent': CleanerAgent})
-        # Для других агентов model_rebuild не требуется, т.к. у них нет forward refs
         logger.info("Модели агентов успешно пересобраны.")
     except Exception as e:
         logger.error(f"Не удалось пересобрать модели агентов: {e}", exc_info=True); return
@@ -60,106 +60,100 @@ async def main():
     # --- Создание экземпляров агентов ---
     logger.info("Создание экземпляров агентов...")
     try:
+        # Передаем конфиг каждому агенту
         cleaner = CleanerAgent(agent_id="cleaner_agent", config=config)
         fetcher = FetcherAgent(agent_id="fetcher_agent", config=config, cleaner_agent_instance=cleaner)
         summarizer = SummarizerAgent(agent_id="summarizer_agent", config=config)
         selector = SelectorAgent(agent_id="selector_agent", config=config)
-        generator = GeneratorAgent(agent_id="generator_agent", config=config) # <-- Создаем GeneratorAgent
+        generator = GeneratorAgent(agent_id="generator_agent", config=config)
+        publisher = PublisherAgent(agent_id="publisher_agent", config=config) # <-- Создаем Publisher
         logger.info("Экземпляры агентов успешно созданы.")
     except Exception as e:
         logger.error(f"Не удалось создать экземпляры агентов: {e}", exc_info=True); return
 
     # --- Блок обработки "застрявших" статей при старте ---
-    # Этот блок теперь обрабатывает последовательно: raw -> cleaned -> summarized -> selected -> post_generated
+    logger.info("--- Начало предварительной обработки ---")
 
-    # 1. Очистка 'raw_fetched'
-    logger.info("Проверка наличия 'raw_fetched' статей для немедленной очистки...")
-    try:
-        raw_ids_to_clean = db_utils.get_articles_by_status('raw_fetched')
-        if raw_ids_to_clean:
-             logger.info(f"Найдено {len(raw_ids_to_clean)} 'raw_fetched'. Запуск cleaner...")
-             payload = {"article_ids": raw_ids_to_clean}
-             payload_str = json.dumps(payload)
-             cleaning_content = Content(role="system", parts=[Part(text=payload_str)])
-             await cleaner.handle_cleaning_request(cleaning_content)
-             logger.info("Запуск cleaner для существующих 'raw_fetched' завершен.")
-        else: logger.info("Статьи 'raw_fetched' для немедленной очистки не найдены.")
-    except AttributeError as e: logger.error(f"Пропущена проверка 'raw_fetched': {e}.")
-    except Exception as e: logger.error(f"Ошибка при очистке существующих 'raw_fetched': {e}", exc_info=True)
+    # Создаем список шагов предварительной обработки
+    startup_pipeline = [
+        (cleaner.handle_cleaning_request, db_utils.get_articles_by_status, 'raw_fetched', "очистки 'raw_fetched'"),
+        (summarizer.run_summarize_cycle, lambda: True, None, "резюмирования 'cleaned'"), # Summarizer ищет сам
+        (selector.run_selection_cycle, lambda: True, None, "выбора 'summarized'"),       # Selector ищет сам
+        (generator.run_generation_cycle, lambda: True, None, "генерации 'selected'"),   # Generator ищет сам
+        (publisher.run_publishing_cycle, lambda: True, None, "публикации 'post_generated'") # Publisher ищет сам
+    ]
 
-    # 2. Резюмирование 'cleaned'
-    logger.info("Проверка наличия 'cleaned' статей для немедленного резюмирования...")
-    try:
-        # Summarizer сам найдет статьи 'cleaned' внутри
-        await summarizer.run_summarize_cycle()
-        logger.info("Запуск summarizer для существующих 'cleaned' завершен.")
-    except Exception as e:
-        logger.error(f"Ошибка при запуске немедленного цикла резюмирования: {e}", exc_info=True)
+    for agent_method, get_ids_func, status_to_check, step_name in startup_pipeline:
+        logger.info(f"Проверка наличия статей для немедленного этапа: {step_name}...")
+        try:
+            # Для первых шагов (очистка) мы передаем ID явно
+            if status_to_check == 'raw_fetched':
+                 ids_to_process = get_ids_func(status_to_check)
+                 if ids_to_process:
+                     logger.info(f"Найдено {len(ids_to_process)} статей со статусом '{status_to_check}'. Запуск агента...")
+                     payload = {"article_ids": ids_to_process}
+                     payload_str = json.dumps(payload)
+                     content_arg = Content(role="system", parts=[Part(text=payload_str)])
+                     await agent_method(content_arg) # Вызываем с аргументом Content
+                 else:
+                     logger.info(f"Статьи со статусом '{status_to_check}' не найдены.")
+            # Для последующих шагов агент сам ищет нужные статьи внутри своего цикла
+            elif get_ids_func(): # Просто проверяем, что функция существует (lambda всегда True)
+                 await agent_method() # Вызываем без аргументов
 
-    # 3. Выбор 'summarized'
-    logger.info("Проверка наличия 'summarized' статей для немедленного выбора...")
-    try:
-        # Selector сам найдет 'summarized' внутри
-        await selector.run_selection_cycle()
-        logger.info("Запуск selector для существующих 'summarized' завершен.")
-    except Exception as e:
-        logger.error(f"Ошибка при запуске немедленного цикла выбора: {e}", exc_info=True)
+            logger.info(f"Запуск агента для этапа '{step_name}' завершен.")
 
+        except AttributeError as e:
+             logger.error(f"Пропущена проверка '{step_name}': необходимая функция не найдена ({e}).")
+        except Exception as e:
+            logger.error(f"Ошибка при запуске немедленного цикла '{step_name}': {e}", exc_info=True)
 
-    # 4. Генерация постов для 'selected'
-    logger.info("Проверка наличия 'selected' статей для немедленной генерации поста...")
-    try:
-        # Generator сам найдет 'selected' внутри
-        await generator.run_generation_cycle() # <-- Вызываем генератор при старте
-        logger.info("Запуск generator для существующей 'selected' статьи (если была) завершен.")
-    except Exception as e:
-         logger.error(f"Ошибка при запуске немедленного цикла генерации поста: {e}", exc_info=True)
-
-    logger.info("Предварительная обработка завершена.")
-    # --- Конец блока обработки "застрявших" ---
-
+    logger.info("--- Предварительная обработка завершена ---")
 
     # --- Логика периодического запуска агентов ---
     async def run_periodic_cycle():
-        """Запускает циклы агентов: Fetcher -> Summarizer -> Selector -> Generator."""
+        """Запускает циклы агентов: Fetcher -> Summarizer -> Selector -> Generator -> Publisher."""
+        # Определяем конвейер агентов и их методов цикла
+        pipeline = [
+            (fetcher, fetcher.run_fetch_cycle, "Fetcher"),
+            (summarizer, summarizer.run_summarize_cycle, "Summarizer"),
+            (selector, selector.run_selection_cycle, "Selector"),
+            (generator, generator.run_generation_cycle, "Generator"),
+            (publisher, publisher.run_publishing_cycle, "Publisher") # <-- Добавлен Publisher
+        ]
+
         while True:
             logger.info("--- Начало нового периодического цикла ---")
 
-            # --- Fetcher ---
-            logger.info("Запуск периодического цикла Fetcher...")
-            try:
-                await fetcher.run_fetch_cycle()
-                logger.info("Периодический цикл Fetcher завершен.")
-            except Exception as e:
-                logger.error(f"Ошибка в цикле Fetcher: {e}", exc_info=True); await asyncio.sleep(60)
+            # Последовательно выполняем каждый шаг конвейера
+            for agent_instance, cycle_method, agent_name in pipeline:
+                logger.info(f"Запуск периодического цикла {agent_name}...")
+                try:
+                    # Вызываем метод цикла для текущего агента
+                    await cycle_method()
+                    logger.info(f"Периодический цикл {agent_name} завершен.")
+                    # Добавим короткую паузу между агентами для разгрузки
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    logger.error(f"Ошибка в цикле {agent_name}: {e}", exc_info=True)
+                    logger.info(f"Пауза 60 секунд после ошибки агента {agent_name}...")
+                    await asyncio.sleep(60)
+                    # Решаем, прерывать ли весь цикл конвейера при ошибке одного агента
+                    # Если раскомментировать break, то после ошибки Fetcher'а остальные не запустятся
+                    # break
 
-            # --- Summarizer ---
-            logger.info("Запуск периодического цикла Summarizer...")
+            # --- Ожидание перед следующим полным циклом ---
             try:
-                await summarizer.run_summarize_cycle()
-                logger.info("Периодический цикл Summarizer завершен.")
-            except Exception as e:
-                 logger.error(f"Ошибка в цикле Summarizer: {e}", exc_info=True); await asyncio.sleep(60)
+                # Пытаемся получить интервал из конфига, иначе используем 1 час
+                cycle_interval_seconds = int(config.get('cycle_interval', 3600))
+                if cycle_interval_seconds <= 0:
+                    logger.warning("Интервал цикла 'cycle_interval' в конфиге <= 0. Используется 3600 секунд.")
+                    cycle_interval_seconds = 3600
+            except ValueError:
+                logger.warning("Некорректное значение 'cycle_interval' в конфиге. Используется 3600 секунд.")
+                cycle_interval_seconds = 3600
 
-            # --- Selector ---
-            logger.info("Запуск периодического цикла Selector...")
-            try:
-                await selector.run_selection_cycle()
-                logger.info("Периодический цикл Selector завершен.")
-            except Exception as e:
-                 logger.error(f"Ошибка в цикле Selector: {e}", exc_info=True); await asyncio.sleep(60)
-
-            # --- Generator ---
-            logger.info("Запуск периодического цикла Generator...")
-            try:
-                await generator.run_generation_cycle() # <-- Вызываем Generator
-                logger.info("Периодический цикл Generator завершен.")
-            except Exception as e:
-                 logger.error(f"Ошибка в цикле Generator: {e}", exc_info=True); await asyncio.sleep(60)
-
-            # --- Ожидание ---
-            cycle_interval_seconds = int(config.get('cycle_interval', 3600)) # Берем из конфига или 1 час
-            logger.info(f"--- Цикл завершен. Ожидание {cycle_interval_seconds} секунд... ---")
+            logger.info(f"--- Полный цикл конвейера завершен. Ожидание {cycle_interval_seconds} секунд... ---")
             await asyncio.sleep(cycle_interval_seconds)
 
 

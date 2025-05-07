@@ -323,3 +323,49 @@ def get_selected_article() -> Optional[Dict[str, Any]]:
         if conn:
             conn.close()
     return article_data
+
+
+
+
+def get_post_to_publish() -> Optional[Dict[str, Any]]:
+    """
+    Находит ОДНУ статью со статусом 'post_generated' для публикации.
+    Предпочтение отдается более старой статье 'post_generated', если их несколько.
+
+    Returns:
+        Словарь с данными статьи (id, post_md_path) или None.
+    """
+    conn = get_db_connection()
+    article_data = None
+    if not conn:
+        logger.error("Не удалось получить статью для публикации: нет соединения с БД.")
+        return None
+
+    logger.info("Поиск статьи со статусом 'post_generated' для публикации...")
+
+    try:
+        cursor = conn.cursor()
+        # Нам нужен только ID и путь к файлу поста
+        sql = """
+            SELECT id, post_md_path
+            FROM articles
+            WHERE status = 'post_generated'
+            ORDER BY fetched_at ASC
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        row = cursor.fetchone()
+        if row:
+            article_data = dict(row)
+            logger.info(f"Найдена статья для публикации: ID={article_data.get('id')}, Путь к посту='{article_data.get('post_md_path')}'")
+        else:
+            logger.info("Статей со статусом 'post_generated' для публикации не найдено.")
+
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка получения статьи со статусом 'post_generated' из БД: {e}")
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка при получении 'post_generated' статьи: {e}", exc_info=True)
+    finally:
+        if conn:
+            conn.close()
+    return article_data

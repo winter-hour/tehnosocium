@@ -4,7 +4,6 @@ import logging
 import asyncio
 from typing import Optional
 
-# Убедись, что библиотека установлена: pip install python-telegram-bot
 from telegram import Bot
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
