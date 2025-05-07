@@ -1,8 +1,8 @@
 # utils/db_utils.py
 import sqlite3
 import logging
-from datetime import datetime, timedelta # <--- Убедись, что timedelta импортирован
-from typing import Optional, List, Dict, Any # <--- Убедись, что импорты типов есть
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any 
 
 # --- Настройка логгера ---
 logging.basicConfig(level=logging.INFO,
@@ -272,4 +272,54 @@ def get_recent_summarized_articles(timespan_hours: int = 24) -> List[Dict[str, A
     finally:
         if conn: conn.close()
     return articles
-# --- КОНЕЦ НОВОЙ ФУНКЦИИ ---
+
+
+
+
+
+
+def get_selected_article() -> Optional[Dict[str, Any]]:
+    """
+    Находит ОДНУ статью со статусом 'selected' для генерации поста.
+    Предпочтение отдается более старой статье 'selected', если их несколько.
+
+    Returns:
+        Словарь с данными статьи (id, title, url, source_name, publication_date, cleaned_md_path)
+        или None, если статей со статусом 'selected' нет.
+    """
+    conn = get_db_connection()
+    article_data = None
+    if not conn:
+        logger.error("Не удалось получить выбранную статью: нет соединения с БД.")
+        return None
+
+    logger.info("Поиск статьи со статусом 'selected' для генерации поста...")
+
+    try:
+        cursor = conn.cursor()
+        # Выбираем все необходимые поля для статьи со статусом 'selected'
+        # Сортируем по fetched_at ASC, чтобы взять самую "старую" выбранную, если их > 1
+        # LIMIT 1 гарантирует, что вернется не более одной строки
+        sql = """
+            SELECT id, title, url, source_name, publication_date, cleaned_md_path
+            FROM articles
+            WHERE status = 'selected'
+            ORDER BY fetched_at ASC
+            LIMIT 1
+        """
+        cursor.execute(sql)
+        row = cursor.fetchone()
+        if row:
+            article_data = dict(row)
+            logger.info(f"Найдена статья для генерации поста: ID={article_data.get('id')}, Заголовок='{article_data.get('title')}'")
+        else:
+            logger.info("Статей со статусом 'selected' для генерации поста не найдено.")
+
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка получения статьи со статусом 'selected' из БД: {e}")
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка при получении 'selected' статьи: {e}", exc_info=True)
+    finally:
+        if conn:
+            conn.close()
+    return article_data

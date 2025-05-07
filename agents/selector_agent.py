@@ -11,7 +11,7 @@ import google.generativeai as genai
 from google.adk.agents.base_agent import BaseAgent
 from google.api_core.exceptions import ResourceExhausted
 
-from utils import db_utils, md_utils # Импортируем наши утилиты
+from utils import db_utils, md_utils
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO,
